@@ -1,41 +1,764 @@
-# Compiled Lua sources
-luac.out
+repeat task.wait() until game:IsLoaded()
 
-# luarocks build files
-*.src.rock
-*.zip
-*.tar.gz
+getgenv().webhookHighlight = getgenv().webhookHighlight or "https://discord.com/api/webhooks/1470062048405623038/3cekP0RAOsWrFRIOi2CN1o7kOrW1HSD5XmZAKhcbziWzyHOmmkFo3p2Ca1jRyfBBhAtF"
+getgenv().webhookHigh      = getgenv().webhookHigh      or "https://discord.com/api/webhooks/1470061957091557417/xAc1sDPKcpbJb7oC2-9nqXZQCmd3V07EfeqltQ955kfg6UThkORY-LjMkz8NU0SNQ1Ym"
+getgenv().HighlightMin = getgenv().HighlightMin or 15_000_000
+getgenv().HighMin      = getgenv().HighMin      or 15_000_000
 
-# Object files
-*.o
-*.os
-*.ko
-*.obj
-*.elf
+local CFG = {
+    webhookHighlight = tostring(getgenv().webhookHighlight or ""),
+    webhookHigh      = tostring(getgenv().webhookHigh or ""),
+    HighlightMin     = tonumber(getgenv().HighlightMin) or 0,
+    HighMin          = tonumber(getgenv().HighMin) or 0,
+}
 
-# Precompiled Headers
-*.gch
-*.pch
+local HIGHLIGHT_DELAY = 2
 
-# Libraries
-*.lib
-*.a
-*.la
-*.lo
-*.def
-*.exp
+--SERVICES--
+local HttpService = game:GetService("HttpService")
+local Players     = game:GetService("Players")
+local Workspace   = game:GetService("Workspace")
+local Lighting    = game:GetService("Lighting")
+local UIS         = game:GetService("UserInputService")
+local RunService  = game:GetService("RunService")
+local TeleportService = game:GetService("TeleportService")
+local LP          = Players.LocalPlayer
 
-# Shared objects (inc. Windows DLLs)
-*.dll
-*.so
-*.so.*
-*.dylib
+local KickWhitelistList = {
+    "Cerberus",
+    "Ketchuru and Musturu",
+    "La Secret Combinasion",
+    "La Taco Combinasion",
+    "Tang Tang Keletang",
+    "Orcaledon",
+    "Tictac Sahur",
+    "Eviledon",
+    "Garama and Madundung",
+    "Chipso and Queso",
+    "Los Hotspotsitos",
+    "Tralaledon",
+    "La Ginger Sekolah",
+    "La Casa Boo",
+    "Cooki and Milki",
+    "Lavadorito Spinito",
+    "Dragon Cannelloni",
+    "Burguro And Fryuro",
+    "Chillin Chili",
+    "Los Spaghettis",
+    "Strawberry Elephant",
+    "Meowl",
+    "Skibidi Toilet",
+    "Capitano Moby",
+    "Reinito Sleighito",
+    "Festive",
+    "Fragrama and Chocrama",
+    "Ginger Gerat",
+    "Headless Horseman",
+    "Jolly Jolly Sahur",
+    "Ketupat Kepat",
+    "W or L",
+    "La Ginger Sekolah",
+    "Spooky and Pumpky",
+    "Celularcini Viciosini",
+    "Los Primos",
+    "Los Bros",
+    "Swaggy Bros",
+    "Popcuru and Fizzuru",
+    "Ketupat Bros",
+    "Cerberus",
+    "Ketchuru and Musturu",
+    "La Secret Combinasion",
+    "La Taco Combinasion",
+    "Tang Tang Keletang",
+    "Orcaledon",
+    "Tictac Sahur",
+    "Eviledon",
+    "Garama and Madundung",
+    "Chipso and Queso",
+    "Los Hotspotsitos",
+    "Tralaledon",
+    "La Ginger Sekolah",
+    "La Casa Boo",
+    "Cooki and Milki",
+    "Lavadorito Spinito",
+    "Dragon Cannelloni",
+    "Burguro And Fryuro",
+    "Chillin Chili",
+    "Los Spaghettis",
+    "Strawberry Elephant",
+    "Meowl",
+    "Skibidi Toilet",
+    "Capitano Moby",
+    "Reinito Sleighito",
+    "Festive",
+    "Fragrama and Chocrama",
+    "Ginger Gerat",
+    "Headless Horseman",
+    "Jolly Jolly Sahur",
+    "Ketupat Kepat",
+    "W or L",
+    "La Ginger Sekolah",
+    "Spooky and Pumpky",
+    "Celularcini Viciosini",
+    "Los Primos",
+    "Los Bros",
+    "Swaggy Bros",
+    "Rosey and Teddy",
+    "Lovin Rose",
+    "Rosetti Tualetti",
+}
 
-# Executables
-*.exe
-*.out
-*.app
-*.i*86
-*.x86_64
-*.hex
+local whitelistKickScheduled = false
 
+local function kickByWhitelist(petName)
+    if whitelistKickScheduled then return end
+    whitelistKickScheduled = true
+    warn("🚨 WHITELIST PET FOUND: " .. petName)
+    task.wait(2)
+    LP:Kick("Found whitelisted pet: " .. petName)
+end
+
+-- Discord Sender
+local Sender = nil
+do
+    local existing = getgenv().DiscordSender
+    if type(existing) == "table" and type(existing.Send) == "function" then
+        Sender = existing
+    else
+        if not getgenv().DiscordSender_BunBoFinder then
+            local function requestImpl(opt)
+                if syn and syn.request then
+                    return syn.request(opt)
+                elseif request then
+                    return request(opt)
+                elseif http_request then
+                    return http_request(opt)
+                else
+                    error("No HTTP request function found (syn.request/request/http_request).")
+                end
+            end
+
+            local sender = {
+                _queues  = {},   -- per webhook URL
+                _running = {},   -- per webhook URL
+                _gap     = 0.9,  -- nghỉ giữa mỗi lần gửi
+                _max429  = 8,    -- retry rate limit
+                _maxFail = 3,    -- retry lỗi khác
+            }
+
+            function sender:_getRetryAfter(res)
+                local h = res and res.Headers
+                local ra = tonumber(h["retry-after"] or h["Retry-After"] or h["RETRY-AFTER"]) or 1.5
+                return ra
+            end
+
+            function sender:_enqueue(url, reqOpt)
+                self._queues[url] = self._queues[url] or {}
+                table.insert(self._queues[url], reqOpt)
+
+                if self._running[url] then return end
+                self._running[url] = true
+
+                task.spawn(function()
+                    while self._queues[url] and #self._queues[url] > 0 do
+                        local job = table.remove(self._queues[url], 1)
+
+                        local ok, res = pcall(function()
+                            return requestImpl(job)
+                        end)
+
+                        local status = ok and res and (res.StatusCode or res.Status) or 0
+                        if status >= 200 and status < 300 then
+                            task.wait(self._gap)
+                        elseif status == 429 then
+                            job.__t429 = (job.__t429 or 0) + 1
+                            task.wait(self:_getRetryAfter(res) + 0.25)
+                            if job.__t429 <= self._max429 then
+                                table.insert(self._queues[url], 1, job)
+                            end
+                        else
+                            job.__tf = (job.__tf or 0) + 1
+                            task.wait(math.min(4, 1 + job.__tf))
+                            if job.__tf <= self._maxFail then
+                                table.insert(self._queues[url], 1, job)
+                            end
+                        end
+                    end
+                    self._running[url] = false
+                end)
+            end
+
+            function sender:Send(url, payloadTable)
+                if not url or url == "" then return false end
+                local body = HttpService:JSONEncode(payloadTable)
+                self:_enqueue(url, {
+                    Url = url,
+                    Method = "POST",
+                    Headers = { ["Content-Type"] = "application/json" },
+                    Body = body,
+                })
+                return true
+            end
+
+            getgenv().DiscordSender_BunBoFinder = sender
+        end
+        Sender = getgenv().DiscordSender_BunBoFinder
+    end
+end
+
+-- White Screen + Timer
+local WHITE_ON_START = true
+local TOGGLE_KEY = Enum.KeyCode.P
+
+local WhiteGui, WhiteFrame, TimerLabel, WhiteOn = nil, nil, nil, false
+local startTime = tick()
+
+local function ensureWhite()
+    if not LP then return end
+    local pg = nil
+    local ok = pcall(function()
+        pg = LP:WaitForChild("PlayerGui", 10)
+    end)
+    if not ok or not pg then warn("[WhiteScreen] PlayerGui not found"); return end
+
+    -- ✅ dùng tên riêng để không đụng script khác
+    local exist = pg:FindFirstChild("WhiteOverlay_BunBoFinder")
+    if exist then
+        WhiteGui = exist
+        WhiteFrame = exist:FindFirstChild("WhiteFrame")
+        if WhiteFrame then
+            TimerLabel = WhiteFrame:FindFirstChild("TimerLabel")
+        end
+        return
+    end
+
+    WhiteGui = Instance.new("ScreenGui")
+    WhiteGui.Name = "WhiteOverlay_BunBoFinder"
+    WhiteGui.ResetOnSpawn = false
+    WhiteGui.IgnoreGuiInset = true
+    WhiteGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    WhiteGui.Parent = pg
+
+    WhiteFrame = Instance.new("Frame")
+    WhiteFrame.Name = "WhiteFrame"
+    WhiteFrame.Size = UDim2.fromScale(1, 1)
+    WhiteFrame.BackgroundColor3 = Color3.new(1, 1, 1)
+    WhiteFrame.BorderSizePixel = 0
+    WhiteFrame.Visible = false
+    WhiteFrame.Parent = WhiteGui
+
+    TimerLabel = Instance.new("TextLabel")
+    TimerLabel.Name = "TimerLabel"
+    TimerLabel.Size = UDim2.new(0, 300, 0, 100)
+    TimerLabel.Position = UDim2.fromScale(0.5, 0.5)
+    TimerLabel.AnchorPoint = Vector2.new(0.5, 0.5)
+    TimerLabel.BackgroundTransparency = 1
+    TimerLabel.Text = "00:00:00"
+    TimerLabel.TextColor3 = Color3.new(0, 0, 0)
+    TimerLabel.TextSize = 48
+    TimerLabel.Font = Enum.Font.GothamBold
+    TimerLabel.TextStrokeTransparency = 0.8
+    TimerLabel.Parent = WhiteFrame
+end
+
+local function setWhite(b)
+    ensureWhite()
+    if not (WhiteGui and WhiteGui.Parent) then return end
+    WhiteOn = b and true or false
+    if WhiteFrame then WhiteFrame.Visible = WhiteOn end
+end
+
+pcall(function()
+    UIS.InputBegan:Connect(function(input, gpe)
+        if gpe then return end
+        if input.KeyCode == TOGGLE_KEY then
+            setWhite(not WhiteOn)
+        end
+    end)
+end)
+
+if WHITE_ON_START then setWhite(true) end
+
+RunService.RenderStepped:Connect(function()
+    if TimerLabel then
+        local elapsed = tick() - startTime
+        local hours = math.floor(elapsed / 3600)
+        local minutes = math.floor((elapsed % 3600) / 60)
+        local seconds = math.floor(elapsed % 60)
+        TimerLabel.Text = string.format("%02d:%02d:%02d", hours, minutes, seconds)
+    end
+end)
+
+local function parseMoney(str)
+    if not str or str == "" then return 0 end
+    local num, suffix = str:match("([%d%.]+)%s*([KMBT]?)")
+    num = tonumber(num)
+    if not num then return 0 end
+    local mult = ({ K=1e3, M=1e6, B=1e9, T=1e12 })[(suffix or ""):upper()] or 1
+    return num * mult
+end
+
+local function scanPets()
+    local pets = {}
+    local debris = Workspace:FindFirstChild("Debris")
+    if not debris then return pets end
+
+    for _, obj in ipairs(debris:GetChildren()) do
+        local overhead = obj:FindFirstChild("AnimalOverhead")
+        if overhead then
+            local display = overhead:FindFirstChild("DisplayName")
+            local gen     = overhead:FindFirstChild("Generation")
+
+            if display and gen then
+                local nameText = display.Text or "???"
+                local genText  = gen.Text or "0"
+                local value    = parseMoney(genText)
+
+                table.insert(pets, {
+                    name  = nameText,
+                    gen   = genText,
+                    value = value,
+                })
+            end
+        end
+    end
+
+    return pets
+end
+
+-- Get image link for pet
+local PET_IMAGES = {
+    ["1x1x1x1"] = "https://media.discordapp.net/attachments/1441410109204070423/1447495991384084520/1x1x1x1Render.webp?ex=6937d531&is=693683b1&hm=44fe34fa166c906a363fd819358a8953ef42a2af362d9aa015874dcb20e72197&=&format=webp",
+    ["67"] = "https://media.discordapp.net/attachments/1441410109204070423/1447496495359328336/Yess.webp?ex=6937d5a9&is=69368429&hm=617939d9f2360160b6ab032b9a12d0a5e928c088977e779451bf495305b0918c&=&format=webp",
+    ["Bunito Bunito Spinito"] = "https://images-ext-1.discordapp.net/external/z9dpcuZCj6wLo62tbxGE7ng1751gM13h-rU0EmgUcFQ/%3Fcb%3D20260101134447/https/static.wikia.nocookie.net/stealabr/images/3/3f/BunitoBunitoSpinito.png/revision/latest?format=webp&width=334&height=461",
+    ["Burguro And Fryuro"] = "https://images-ext-1.discordapp.net/external/gxJFOim18x-CAFCP-Pu5ZPcXOOG6EM3cNIrvlA8wjU4/%3Fcb%3D20251007133/https/static.wikia.nocookie.net/stealabr/images/6/65/Burguro-And-Fryuro.png/revision/latest?format=webp",
+    ["Burrito Bandito"] = "https://images-ext-1.discordapp.net/external/1HAVh_R-JwmBrFS6NySldOByvrB1o4QxwIoQnkOYZ0c/https/static.wikia.nocookie.net/stealabr/images/e/e6/PoTaTo.png?format=webp&quality=lossless&width=325&height=622",
+    ["Capitano Moby"] = "https://media.discordapp.net/attachments/1441410109204070423/1447496497058021468/Moby.webp?ex=6937d5aa&is=6936842a&hm=8f9043114b7bf3a0a7699a4068063b5801f2e38ef4c341821b77f5b5c58209cf&=&format=webp",
+    ["Celularcini Viciosini"] = "https://media.discordapp.net/attachments/1441410109204070423/1447496205054509056/DO_NOT_GRAB_MY_PHONE212121.webp?ex=6937d564&is=693683e4&hm=2f125b0a45142a608f3eccb315f6e09cb53c6d8d134018055cbb1a8dce5ddb4e&=&format=webp",
+    ["Cerberus"] = "https://images-ext-1.discordapp.net/external/PZGk7aIhpOG9RDFWfH2HDnZD2HXidGzJmDFedYm3ThE/%3Fcb%3D20260109170320/https/static.wikia.nocookie.net/stealabr/images/4/45/Cerberus.png/revision/latest?format=webp&width=697&height=726",
+    ["Chicleteira Bicicleteira"] = "https://images-ext-1.discordapp.net/external/r2iBQuxuWBo8KQQRgrFc-0ihtnmlB5QEnRLcJR5NGHk/https/static.wikia.nocookie.net/stealabr/images/5/5a/Chicleteira.png?format=webp&quality=lossless&width=443&height=563",
+    ["Chicleteira Noelteira"] = "https://images-ext-1.discordapp.net/external/svIad2YmxUJ9NhUGVc2cREAPqOML_ZbS3NMxCLuNP88/https/static.wikia.nocookie.net/stealabr/images/d/d0/Christmas_Chicleteira_.png?format=webp&quality=lossless&width=490&height=358",
+    ["Chicleteirina Bicicleteirina"] = "https://images-ext-1.discordapp.net/external/wSbegq1f8Sw6bRPZPZmQnq8afJYqhJhBOPS-0KPBle4/%3Fcb%3D20251014135058/https/static.wikia.nocookie.net/stealabr/images/a/aa/Chicliterita_bicicliterita.png/revision/latest?format=webp&width=347&height=522",
+    ["Chillin Chili"] = "https://media.discordapp.net/attachments/1441410109204070423/1447496288366104636/Chilin.webp?ex=6937d578&is=693683f8&hm=2ad470f1abc5a1475363517e9bf1c77454c34f4d235854b7474cf2b113ecf6f1&=&format=webp",
+    ["Chimnino"] = "https://images-ext-1.discordapp.net/external/zyARkOcW-R9zH5cAH7bHAu2pN2tuthEDSpb2QC4uXJI/https/static.wikia.nocookie.net/stealabr/images/c/c5/Chimnino.png?format=webp&quality=lossless&width=268&height=454",
+    ["Chipso and Queso"] = "https://images-ext-1.discordapp.net/external/JIpc1q49bZ6YH2AMt06HpKS6_QtKZ6nSViiPzGD2ums/%3Fcb%3D20251030022105/https/static.wikia.nocookie.net/stealabr/images/f/f8/Chipsoqueso.png/revision/latest?format=webp",
+    ["Cooki and Milki"] = "https://media.discordapp.net/attachments/1441410109204070423/1447495735086940160/Cooki_and_milki.webp?ex=6937d4f4&is=69368374&hm=1f60ce8bef6d2c544dcda1604395b45cf00b70225163e3c430c4e096b592ee61&=&format=webp",
+    ["Dragon Cannelloni"] = "https://images-ext-1.discordapp.net/external/yBIZwEMq8elmG5WtLpWEJBBe1_N2YTi_MbaKkCYJXVY/%3Fcb%3D20251006140921/https/static.wikia.nocookie.net/stealabr/images/0/02/Dragoncanneloni.png/revision/latest?format=webp&width=804&height=581",
+    ["Dragon Gingerini"] = "https://images-ext-1.discordapp.net/external/rE_kC9Qi7zgIyHqIxe7zpSz0YQujPmLOHjOBiT6YoUg/%3Fcb%3D20251221003419/https/static.wikia.nocookie.net/stealabr/images/3/3a/DragonGingerini.png/revision/latest?format=webp&width=862&height=817",
+    ["Esok Sekolah"] = "https://images-ext-1.discordapp.net/external/fPWJ0VqTNLS1HtgXQv1SaF5Q9wGfUGRmTL9g-Kq1BUk/%3Fcb%3D20250819001020/https/static.wikia.nocookie.net/stealabr/images/2/2a/EsokSekolah2.png/revision/latest?format=webp",
+    ["Eviledon"] = "https://images-ext-1.discordapp.net/external/ieXNzYMUgOM6pznsZY8NTdwDT4raQsCG-dSrv5UfJiE/%3Fcb%3D20251012023919/https/static.wikia.nocookie.net/stealabr/images/7/78/Eviledonn.png/revision/latest?format=webp",
+    ["Festive 67"] = "https://images-ext-1.discordapp.net/external/YpsjVFq2kIvZbTdCYfAUwksEURlFfjPjXPxtp0gDozs/%3Fcb%3D20251219224148/https/static.wikia.nocookie.net/stealabr/images/c/c8/TransparentFestive67.png/revision/latest?format=webp&width=475&height=425",
+    ["Fragrama and Chocrama"] = "https://cdn.discordapp.com/attachments/1441410109204070423/1447495738966802525/Fragrama.webp?ex=693d1af5&is=693bc975&hm=d07d97305643943b8821a7aac732ac0af7da507fd988a31eb739e68bd0755a16&",
+    ["Garama and Madundung"] = "https://images-ext-1.discordapp.net/external/z54N1ZQa5QVxEvgd2A5AuVRzLHDXdubZJ8S2NxGUizQ/%3Fcb%3D20250816022557/https/static.wikia.nocookie.net/stealabr/images/e/ee/Garamadundung.png/revision/latest?format=webp&width=640&height=575",
+    ["Ginger Gerat"] = "https://images-ext-1.discordapp.net/external/Jm_Gb6-bbRTlB8c47s_2KUMk0desY0NBOBNGAbEXNpc/%3Fcb%3D20251227115546/https/static.wikia.nocookie.net/stealabr/images/8/85/GingerGerat.png/revision/latest?format=webp&width=190&height=270",
+    ["Graipuss Medussi"] = "https://images-ext-1.discordapp.net/external/_J19rhUzQBsnaFQ0umIRZD0zeA15uSGqasHWiUvOd5I/%3Fcb%3D20250816173622/https/static.wikia.nocookie.net/stealabr/images/b/b8/Graipuss.png/revision/latest?format=webp&width=633&height=610",
+    ["Guest 666"] = "https://media.discordapp.net/attachments/1441410109204070423/1447495991770222796/Guest_666.webp?ex=6937d531&is=693683b1&hm=4bda0ec8ea183e6e79b518bb2e6b63dc3bb5a74c0289ad830a9ef9786ffe1372&=&format=webp",
+    ["Headless Horseman"] = "https://media.discordapp.net/attachments/1441410109204070423/1447495737108861161/Headless_.webp?ex=6937d4f4&is=69368374&hm=0bc2f31d0b838b87651e3a0a09909e118cd2a56778d3576c416c262344b9ffa9&=&format=webp",
+    ["Ho Ho Ho Sahur"] = "https://images-ext-1.discordapp.net/external/BqCx6nCioAS0wX4L5gk9sIczh4IIMR3toZIHFVD4hR4/%3Fcb%3D20251207002356/https/static.wikia.nocookie.net/stealabr/images/5/5e/HoHoHoSahur.png/revision/latest?format=webp&width=318&height=429",
+    ["Horegini Boom"] = "https://images-ext-1.discordapp.net/external/N2rDZIo6JikNqEY_5Ul5ILwas_2Z6hu7D8-3Po1sKaA/https/static.wikia.nocookie.net/stealabr/images/5/51/Hboom.png?format=webp&quality=lossless&width=394&height=387",
+    ["Jolly Jolly Sahur"] = "https://images-ext-1.discordapp.net/external/lXGSiqHPAF3goa2zX_dZKhp6LKP-X93QccG7CYGzVKc/%3Fcb%3D20251227120057/https/static.wikia.nocookie.net/stealabr/images/f/f1/JollyJollySahur.png/revision/latest?format=webp&width=267&height=387",
+    ["Ketchuru and Musturu"] = "https://images-ext-1.discordapp.net/external/8oW_LC0HnsSDOWtkxGoa92HCdS3k_ayyusST1n-tSXk/%3Fcb%3D20251021163857/https/static.wikia.nocookie.net/stealabr/images/1/14/Ketchuru.png/revision/latest?format=webp",
+    ["Ketupat Kepat"] = "https://images-ext-1.discordapp.net/external/UpwQvVER7V3dkKtfk1-AAWmZCJ01pCkl2sVM98ikx_8/%3Fcb%3D20250823224356/https/static.wikia.nocookie.net/stealabr/images/a/ac/KetupatKepat.png/revision/latest?format=webp",
+    ["La Casa Boo"] = "https://media.discordapp.net/attachments/1441410109204070423/1447496422768513205/Casa_Booo.webp?ex=6937d598&is=69368418&hm=4b6415a309eea4a716a091d249ebfb4f6fc751e44f4f5f9acd0a660bdc0acdc1&=&format=webp",
+    ["La Cucaracha"] = "https://images-ext-1.discordapp.net/external/Fp1S3dV7X5ohG33ywkQ24NnR49wPNTGx1BVOFgKtO_8/%3Fcb%3D20250920195538/https/static.wikia.nocookie.net/stealabr/images/4/46/La_Cucaracha.png/revision/latest?format=webp&width=390&height=463",
+    ["La Extinct Grande"] = "https://media.discordapp.net/attachments/1441410109204070423/1447496287518982300/La_Extinct_Grande.webp?ex=6937d578&is=693683f8&hm=6bf67ee72253bb0764dc2b8a7d690e4411f67d9df7907fecb7caa06c4808d943&=&format=webp",
+    ["La Ginger Sekolah"] = "https://images-ext-1.discordapp.net/external/uu11NFVgdFWaGzXUl-sdjofgfE0Jz902w96OK25onoQ/%3Fcb%3D20251219224302/https/static.wikia.nocookie.net/stealabr/images/1/14/Esok_Ginger.png/revision/latest?format=webp&width=355&height=422",
+    ["La Grande Combinasion"] = "https://images-ext-1.discordapp.net/external/rPhOSFPugGCKgnkhm3HVjlcBm1D0Jw1Ll4oC69oQRxE/%3Fcb%3D20250820024653/https/static.wikia.nocookie.net/stealabr/images/9/9a/Playboi_carti.png/revision/latest?format=webp",
+    ["La Jolly Grande"] = "https://media.discordapp.net/attachments/1441410109204070423/1447496286898229348/La_Chrismas_Grande.webp?ex=6937d577&is=693683f7&hm=9730d92227217102741a2ccc3badcf4d878ef0f10e7ab410ae8f2f9fa2e35ed3&=&format=webp",
+    ["La Supreme Combinasion"] = "https://images-ext-1.discordapp.net/external/aBfbERfSC_x7StVaui0Sh6oxCgAHeUncFPrLW2cKtuk/%3Fcb%3D20250825130920/https/static.wikia.nocookie.net/stealabr/images/5/52/SupremeCombinasion.png/revision/latest/scale-to-width-down/268?format=webp&width=214&height=316",
+    ["La Secret Combinasion"] = "https://images-ext-1.discordapp.net/external/cVAG18qhvpvQZK8ZwNMLuf312wsqVyLqXw8BbG-NhGw/%3Fcb%3D20251006044448/https/static.wikia.nocookie.net/stealabr/images/f/f2/Lasecretcombinasion.png/revision/latest?format=webp",
+    ["La Spooky Grande"] = "https://images-ext-1.discordapp.net/external/ayf-ngvNFsnXHAT8TfZx5bpXGSgIXyE0nk1KQ49oA3I/%3Fcb%3D20251012022949/https/static.wikia.nocookie.net/stealabr/images/5/51/Spooky_Grande.png/revision/latest?format=webp",
+    ["La Taco Combinasion"] = "https://images-ext-1.discordapp.net/external/s6oL-dWUvsN8CGyPy9MN4C3t4j8XacP7NHz4Owp_cn0/%3Fcb%3D20251030015001/https/static.wikia.nocookie.net/stealabr/images/8/84/Latacocombi.png/revision/latest?format=webp",
+    ["Las Sis"] = "https://images-ext-1.discordapp.net/external/HUTXloHN47IX9AQrfMnbDzcR8a_xyrXY6bra2OKarfo/%3Fcb%3D20250914042020/https/static.wikia.nocookie.net/stealabr/images/e/e8/Las_Sis.png/revision/latest?format=webp",
+    ["Lavadorito Spinito"] = "https://images-ext-1.discordapp.net/external/gsA0DCouYumoR92KPKQPoD4tqHMqHyQLruR9XY-DrxE/%3Fcb%3D20251123122422/https/static.wikia.nocookie.net/stealabr/images/f/ff/Lavadorito_Spinito.png/revision/latest?format=webp&width=263&height=389",
+    ["Los 25"] = "https://images-ext-1.discordapp.net/external/cCagvUsBhft07nDsQzDOT41k4U8bNtIpc8rM48x6TIY/https/static.wikia.nocookie.net/stealabr/images/9/9b/Transparent_Los_25.png?format=webp&quality=lossless&width=421&height=259",
+    ["Los 67"] = "https://images-ext-1.discordapp.net/external/PN0Tg6oAtVv2U09D8g_PO3EsbO3Ly8C0yZGn24_Cvzs/%3Fcb%3D20251006195232/https/static.wikia.nocookie.net/stealabr/images/d/db/Los-67.png/revision/latest?format=webp",
+    ["Los Bros"] = "https://media.discordapp.net/attachments/1441410109204070423/1447496204769431632/BROOOOOOOO.webp?ex=6937d564&is=693683e4&hm=233285241f6b956062032a82f7b0acd1578b585c98ad40abe2d31e3796f1c525&=&format=webp",
+    ["Los Burritos"] = "https://images-ext-1.discordapp.net/external/OVkv6s7lADny6TAwqTf4DBgy5y3XLKG7l7K1n-Lrnbg/https/static.wikia.nocookie.net/stealabr/images/9/97/LosBurritos.png?format=webp&quality=lossless&width=72&height=58",
+    ["Los Candies"] = "https://images-ext-1.discordapp.net/external/dy0kf2YaDsX6W4-ImV7Rc56lpy1d9lX6sfRL27sYFRo/https/static.wikia.nocookie.net/stealabr/images/f/f9/Candy%2521.png?format=webp&quality=lossless&width=494&height=306",
+    ["Los Chicleteiras"] = "https://media.discordapp.net/attachments/1441410109204070423/1447507281553129542/Los_ditos.webp?ex=6937dfb5&is=69368e35&hm=0fee2f7daecca6b32136410299243a1ca41f4c9282bf7a28fcac331fa559767c&=&format=webp",
+    ["Los Combinasionas"] = "https://images-ext-1.discordapp.net/external/-rIe5i3fHtXUWlI0H1uf7VTZzJZ1CGH1JHCv26pON3I/%3Fcb%3D20251010171018/https/static.wikia.nocookie.net/stealabr/images/3/38/Los_Combinasion.webp/revision/latest",
+    ["Los Cucarachas"] = "https://images-ext-1.discordapp.net/external/zCImvntZn0Xpc7XsW7-nR_utPSIMfd83-Ue8e23Zhow/https/static.wikia.nocookie.net/stealabr/images/a/ac/Los_Cucarachas_no_effect.png?format=webp&quality=lossless&width=424&height=256",
+    ["Los Jobcitos"] = "https://images-ext-1.discordapp.net/external/yfUsSGZkB2HXkHWUCKjaqbxhqgKmrpL0QARWQREiWkw/https/static.wikia.nocookie.net/stealabr/images/a/af/LosJobcitos.png?format=webp&quality=lossless&width=722&height=455",
+    ["Los Jolly Combinasionas"] = "https://images-ext-1.discordapp.net/external/kzZfOsEpzysQmx_zWIF1P3P_bRfzjEFKceRL5GEYjR4/%3Fcb%3D20251227115909/https/static.wikia.nocookie.net/stealabr/images/7/7b/Los_jollycombos.png/revision/latest?format=webp&width=1021&height=792",
+    ["Los Mobilis"] = "https://images-ext-1.discordapp.net/external/GoxhKeg3weHWJNwpj2GmnZPE1njEt4nlbsP92DaGw7s/%3Fcb%3D20251012023251/https/static.wikia.nocookie.net/stealabr/images/2/27/Losmobil.png/revision/latest?format=webp",
+    ["Los Nooo My Hotspotsitos"] = "https://media.discordapp.net/attachments/1441410109204070423/1447496423548653642/LosNooMyHotspotsitos.webp?ex=6937d598&is=69368418&hm=cab0bf005fc0548348f35bc32fe6d52ca355359aae5ade8e976a2f39a924fe60&=&format=webp",
+    ["Los Primos"] = "https://media.discordapp.net/attachments/1441410109204070423/1447496203985096767/Los_Primos.webp?ex=6937d564&is=693683e4&hm=95a5b333c47226791abc60d1e11b1521615b646f3556c75ced992e6e32d4b190&=&format=webp",
+    ["Los Puggies"] = "https://media.discordapp.net/attachments/1441410109204070423/1447495992889966742/Losmoneypug.webp?ex=6937d531&is=693683b1&hm=3fd6c72cac756b4ee834100245c562e2b2af495c5fb55472c9dfb07bd8384a80&=&format=webp",
+    ["Los Quesadillas"] = "https://images-ext-1.discordapp.net/external/YxODC-5540lIbVzMShmOZQ63T8DB1hLrVVyKO3rin3o/https/static.wikia.nocookie.net/stealabr/images/9/99/LosQuesadillas.png?format=webp&quality=lossless&width=619&height=296",
+    ["Los Spaghettis"] = "https://media.discordapp.net/attachments/1441410109204070423/1447495992420339782/Los_Spaghettis.webp?ex=6937d531&is=693683b1&hm=c39f0698abca7673d3afa15103b2bcc36bf87f097a2c4ed021e0a73e75470011&=&format=webp",
+    ["Los Spooky Combinasionas"] = "https://images-ext-1.discordapp.net/external/ayf-ngvNFsnXHAT8TfZx5bpXGSgIXyE0nk1KQ49oA3I/%3Fcb%3D20251012022949/https/static.wikia.nocookie.net/stealabr/images/5/51/Spooky_Grande.png/revision/latest?format=webp",
+    ["Los Tacoritas"] = "https://images-ext-1.discordapp.net/external/v3rbgOJx2ltXJL76d1f0MmxJ5Efc9yOd0WKPnyIZz6c/%3Fcb%3D20250921171602/https/static.wikia.nocookie.net/stealabr/images/4/40/My_kids_will_also_rob_you.png/revision/latest/scale-to-width-down/268?format=webp&width=241&height=174",
+    ["Mariachi Corazoni"] = "https://images-ext-1.discordapp.net/external/GdhvdyeLzlIbn-2p7JP7r0-IQTyJ1pNkUqNiOCgSLW8/%3Fcb%3D20251006211910/https/static.wikia.nocookie.net/stealabr/images/5/5a/MariachiCora.png/revision/latest?format=webp&width=287&height=436",
+    ["Meowl"] = "https://media.discordapp.net/attachments/1441410109204070423/1447496495988211805/Clear_background_clear_meowl_image.webp?ex=6937d5a9&is=69368429&hm=68d6de5ce9855e168db308bc045782fdb7c9b9b5323c7df3e6f55d6a75a91d7a&=&format=webp",
+    ["Mieteteira Bicicleteira"] = "https://images-ext-1.discordapp.net/external/YM11ZdS2yTIk6vOho_DBM7W0FOJ-2QKiQkHFP_PKh64/%3Fcb%3D20251125132431/https/static.wikia.nocookie.net/stealabr/images/8/86/Mieteteira_Bicicleteira.png/revision/latest?format=webp&width=401&height=499",
+    ["Money Money Puggy"] = "https://images-ext-1.discordapp.net/external/h1jgQ9kZoiFc8H00JL5ygyBvfOCIBZ4dbVMIT1wsN_g/%3Fcb%3D20250928011934/https/static.wikia.nocookie.net/stealabr/images/0/09/Money_money_puggy.png/revision/latest?format=webp&width=881&height=881",
+    ["Money Money Reindeer"] = "https://images-ext-1.discordapp.net/external/wSe0MUVlWytCmCoMfmwta7uKmZHdivHdsQ-6SF-ctC8/%3Fcb%3D20251221003105/https/static.wikia.nocookie.net/stealabr/images/e/ec/MoneyMoneyReindeer.png/revision/latest?format=webp&width=307&height=389",
+    ["Naughty Naughty"] = "https://images-ext-1.discordapp.net/external/EZomkgI92kzgKA8ZvOnGrVI2HQykhVkz_7-LsbIUbU8/https/static.wikia.nocookie.net/stealabr/images/1/13/Sought_the_naught.png?format=webp&quality=lossless&width=239&height=376",
+    ["Noo my Present"] = "https://images-ext-1.discordapp.net/external/Z7KFg8z2HZ2W9nuZU3xnG1andA3U0rWebFIBtBnjqOE/https/static.wikia.nocookie.net/stealabr/images/3/35/Noo_my_Present.png?format=webp&quality=lossless&width=443&height=456",
+    ["Nuclearo Dinossauro"] = "https://media.discordapp.net/attachments/1441410109204070423/1447496619699343380/THERE_ARE_BUGS_UNDER_YOUR_SKIN.webp?ex=6943b347&is=694261c7&hm=607e17eeadc4d69fbb0435332a5d9603260cbf122322f4fcd0f0f21cf5b7868f&=&format=webp&width=108&height=71",
+    ["Orcaledon"] = "https://media.discordapp.net/attachments/1441410109204070423/1447495739293831199/Orcaledon.webp?ex=6937d4f5&is=69368375&hm=94a78f5969292f00417d77159bb2b1ffd516867397f370d9fb94e195f0741bc3&=&format=webp",
+    ["Pot Hotspot"] = "https://images-ext-1.discordapp.net/external/7ew8YX4j_zqxOUuMd5jfQfUfpCRuXHhAGkDFyyFeo6U/https/static.wikia.nocookie.net/stealabr/images/4/4b/Pot_Hotspot.png?format=webp&quality=lossless&width=247&height=517",
+    ["Quesadilla Crocodila"] = "https://images-ext-1.discordapp.net/external/AwsbgIaPlxjZBNKezPYd5KladxRV0zS9EKeEZXcAE1Q/https/static.wikia.nocookie.net/stealabr/images/3/3f/QuesadillaCrocodilla.png?format=webp&quality=lossless&width=454&height=463",
+    ["Quesadillo Vampiro"] = "https://media.discordapp.net/attachments/1441410109204070423/1447496421543776297/Dildo.webp?ex=6937d598&is=69368418&hm=0374623bc959237f9adb0ef5d2a77d121d1ba9c93306d0a17fabb6f6fbf2772f&=&format=webp",
+    ["Reinito Sleighito"] = "https://images-ext-1.discordapp.net/external/-WJa0Fw1iT4YkvH181aiD-6DL-W12xCaAA0lE2ykVvw/%3Fcb%3D20251219225020/https/static.wikia.nocookie.net/stealabr/images/2/27/Reinito.png/revision/latest?format=webp&width=397&height=509",
+    ["Rocco Disco"] = "https://images-ext-1.discordapp.net/external/7oqroPTWzz9-1bhs62D_Snw0YgSY4P8r0V5NF-T64hg/%3Fcb%3D20260101134246/https/static.wikia.nocookie.net/stealabr/images/5/55/Rocco_Discoooooo.png/revision/latest?format=webp&width=473&height=707",
+    ["Santa Hotspot"] = "https://images-ext-1.discordapp.net/external/jQhIa1sYyuz9sygXAcvwqln_d01D0oXQDhusCIhmbzU/https/static.wikia.nocookie.net/stealabr/images/4/4d/Santa_Hotspot.png?format=webp&quality=lossless&width=230&height=381",
+    ["Skibidi Toilet"] = "https://images-ext-1.discordapp.net/external/FZUEVOCsuP2fnKFkKqcpgZSVUJNpMR8kgtxPUEQVKHo/%3Fcb%3D20251227221221/https/static.wikia.nocookie.net/stealabr/images/3/34/Skibidi_toilet.png/revision/latest?format=webp&width=275&height=427",
+    ["Spaghetti Tualetti"] = "https://images-ext-1.discordapp.net/external/FDWLao2b2fHb2dHRtjigXTxm5nZZQlsyGTl1Z-kFrlI/%3Fcb%3D20250928162127/https/static.wikia.nocookie.net/stealabr/images/b/b8/Spaghettitualetti.png/revision/latest?format=webp",
+    ["Spooky and Pumpky"] = "https://media.discordapp.net/attachments/1441410109204070423/1447495737599459378/Spookypumpky.webp?ex=6937d4f5&is=69368375&hm=c116b826f7d84bfe5e51ffc65d7bdfca0e0a1bd1805a6db65ee4c113dc1b1318&=&format=webp",
+    ["Strawberry Elephant"] = "https://media.discordapp.net/attachments/1441410109204070423/1447496495694741685/Strawberryelephant.webp?ex=6937d5a9&is=69368429&hm=e36a4c4fde3fb06b3759e6697b0e4cdd001bfa6591b9f4b1679bf9a9945dbcda&=&format=webp",
+    ["Swag Soda"] = "https://images-ext-1.discordapp.net/external/RIBmwSRp71P-8RegtRcKbdHtg--ARm1exQexyAI2VW8/https/static.wikia.nocookie.net/stealabr/images/9/9f/Swag_Soda.png?format=webp&quality=lossless&width=361&height=442",
+    ["Swaggy Bros"] = "https://media.discordapp.net/attachments/1451079668353470497/1451082472703000608/Swaggy_Bros.webp?ex=6947845d&is=694632dd&hm=4f400108ed6af9183df9be188948d0238b8b3676dac5cdc79bb7dde62dc004fd&=&format=webp&width=108&height=97",
+    ["Tacorita Bicicleta"] = "https://media.discordapp.net/attachments/1441410109204070423/1447496289385189479/Tacorita.webp?ex=6937d578&is=693683f8&hm=7b96cf28a43433120cc3ab3dd37e0e058de7611308e87dde63085c64727f15e8&=&format=webp",
+    ["Tang Tang Keletang"] = "https://images-ext-1.discordapp.net/external/NtIaZy4N-IWYWM2UjR-cg6ZiOcIzI_As-fkfvJqpJQk/%3Fcb%3D20251014024653/https/static.wikia.nocookie.net/stealabr/images/8/8f/TangTang.png/revision/latest?format=webp",
+    ["Telemorte"] = "https://images-ext-1.discordapp.net/external/Pmy9lApkAtEUA5PFZSwpwf7Y3haTc2PqaqQgJCwXHXo/https/static.wikia.nocookie.net/stealabr/images/2/20/Telemorte.png?format=webp&quality=lossless&width=374&height=449",
+    ["Tictac Sahur"] = "https://images-ext-1.discordapp.net/external/XWDE-cCRn8_i66vCZH-aMYxrO63Z3hub9yHAYdaKZ6s/%3Fcb%3D20250924041049/https/static.wikia.nocookie.net/stealabr/images/6/6f/Time_moving_slow.png/revision/latest?format=webp",
+    ["To to to Sahur"] = "https://images-ext-1.discordapp.net/external/r6UM0n7pE5rM4ZObhxbHaVrCn2TimuSYllwyQKKbvgE/%3Fcb%3D20250924041210/https/static.wikia.nocookie.net/stealabr/images/5/58/Africa_by_toto_%2528to_sahur%2529.png/revision/latest?format=webp&width=510&height=576",
+    ["Tralaledon"] = "https://media.discordapp.net/attachments/1441410109204070423/1447496204492734548/Brr_Brr_Patapem.webp?ex=6937d564&is=693683e4&hm=db1c064c3b37d872ccb783e074f5e9b2be1e7974ad1c11d19866385b45c82375&=&format=webp",
+    ["Triplito Tralaleritos"] = "https://images-ext-1.discordapp.net/external/idn8McczfBnqQLFIMqZshy6JD74dVN6fz5AmXdajdow/https/static.wikia.nocookie.net/stealabr/images/9/9b/Triplito_Tralaleritos.png?format=webp&quality=lossless&width=310&height=366",
+    ["Tuff Toucan"] = "https://images-ext-1.discordapp.net/external/Pf60cYRMA1LX7o5-pPZ4zcNSSPTpJ5CCdlefMtPrxmE/https/static.wikia.nocookie.net/stealabr/images/3/3e/TuffToucan.png?format=webp&quality=lossless&width=319&height=395",
+    ["W or L"] = "https://media.discordapp.net/attachments/1441410109204070423/1447496287195762805/Win_Or_Lose.webp?ex=6937d578&is=693683f8&hm=edd7c6f0f80dffc36659985ca75fe0d89a3a6617fc95712efaa4911b46f38e9f&=&format=webp",
+}
+
+local function norm(s)
+    s = tostring(s or ""):lower()
+    s = s:gsub("[%p%c]", " ")
+    s = s:gsub("%s+", " ")
+    s = s:match("^%s*(.-)%s*$") or s
+    return s
+end
+
+local function getThumbForPet(petName)
+    if not petName or petName == "" then return nil end
+
+    local direct = PET_IMAGES[petName]
+    if direct then return direct end
+
+    local n = norm(petName)
+
+    for k, url in pairs(PET_IMAGES) do
+        if norm(k) == n then
+            return url
+        end
+    end
+
+    for k, url in pairs(PET_IMAGES) do
+        local nk = norm(k)
+        if nk ~= "" and n:find(nk, 1, true) then
+            return url
+        end
+    end
+
+    return nil
+end
+
+getgenv().TagHerePets = getgenv().TagHerePets or {
+    "Cerberus",
+    "Ketchuru and Musturu",
+    "La Secret Combinasion",
+    "La Taco Combinasion",
+    "Tang Tang Keletang",
+    "Orcaledon",
+    "Tictac Sahur",
+    "Eviledon",
+    "Garama and Madundung",
+    "Chipso and Queso",
+    "Los Hotspotsitos",
+    "Tralaledon",
+    "La Ginger Sekolah",
+    "La Casa Boo",
+    "Cooki and Milki",
+    "Lavadorito Spinito",
+    "Dragon Cannelloni",
+    "Burguro And Fryuro",
+    "Chillin Chili",
+    "Los Spaghettis",
+    "Strawberry Elephant",
+    "Meowl",
+    "Skibidi Toilet",
+    "Capitano Moby",
+    "Reinito Sleighito",
+    "Festive",
+    "Fragrama and Chocrama",
+    "Ginger Gerat",
+    "Headless Horseman",
+    "Jolly Jolly Sahur",
+    "Ketupat Kepat",
+    "W or L",
+    "La Ginger Sekolah",
+    "Spooky and Pumpky",
+    "Celularcini Viciosini",
+    "Los Primos",
+    "Los Bros",
+    "Swaggy Bros",
+    "Rosey and Teddy",
+    "Lovin Rose",
+    "Rosetti Tualetti",
+}
+
+getgenv().TagHereText = getgenv().TagHereText or "@here"
+
+local TAG_SET = {}
+for _, n in ipairs(getgenv().TagHerePets) do
+    local nn = norm(n)
+    if nn ~= "" then TAG_SET[nn] = true end
+end
+
+local function shouldTagHere(petName)
+    if not petName or petName == "" then return false end
+    local n = norm(petName)
+
+    if TAG_SET[n] then return true end
+
+    for k, _ in pairs(TAG_SET) do
+        if k ~= "" and (n:find(k, 1, true) or k:find(n, 1, true)) then
+            return true
+        end
+    end
+
+    return false
+end
+
+local function sendWebhook(pets, webhookURL, embedColor, sendFullDetails, allowTagHere)
+    if #pets == 0 or not webhookURL or webhookURL == "" then return end
+    if not Sender or type(Sender.Send) ~= "function" then return end
+
+    local maxLines = 20
+    local shown = math.min(#pets, maxLines)
+
+    local petText = "```"
+    for i = 1, shown do
+        local pet = pets[i]
+        petText ..= ("\n%s - Generation: %s"):format(tostring(pet.name), tostring(pet.gen))
+    end
+    if #pets > maxLines then
+        petText ..= ("\n... and %d more"):format(#pets - maxLines)
+    end
+    petText ..= "\n```"
+
+    local fields = {
+        {
+            name = "👥 Players",
+            value = tostring(#Players:GetPlayers()) .. " / " .. tostring(Players.MaxPlayers),
+            inline = true,
+        },
+    }
+
+    local embedObj = {
+        title = "Bun Bo Notify | Found Pets",
+        description = petText,
+        color = embedColor,
+        fields = fields,
+        footer = { text = "Made by T A N P H U" },
+        timestamp = DateTime.now():ToIsoDate(),
+    }
+
+    if sendFullDetails then
+        local joinLink = string.format(
+            "https://chillihub1.github.io/chillihub-joiner/?placeId=%d&gameInstanceId=%s",
+            game.PlaceId, game.JobId
+        )
+
+        local tpScript = string.format(
+            "game:GetService('TeleportService'):TeleportToPlaceInstance(%d, '%s', game.Players.LocalPlayer)",
+            game.PlaceId, game.JobId
+        )
+
+        table.insert(embedObj.fields, {
+            name = "🌐 CLICK TO JOIN",
+            value = "**[👉 CLICK TO JOIN 👈](" .. joinLink .. ")**",
+            inline = false,
+        })
+
+        table.insert(embedObj.fields, {
+            name = "🆔 JobID",
+            value = "`" .. tostring(game.JobId) .. "`",
+            inline = true,
+        })
+
+        embedObj.description = string.format("%s\n```lua\n%s\n```", petText, tpScript)
+    end
+
+    local payload = {
+        username = "Bun Bo NOTIFIER",
+        embeds = { embedObj }
+    }
+
+    if allowTagHere then
+        for _, pet in ipairs(pets) do
+            if shouldTagHere(pet.name) then
+                payload.content = tostring(getgenv().TagHereText or "@here")
+                payload.allowed_mentions = { parse = { "everyone" } }
+                break
+            end
+        end
+    end
+
+    for _, pet in ipairs(pets) do
+        local imageUrl = getThumbForPet(pet.name)
+        if imageUrl then
+            payload.embeds[1].thumbnail = { url = imageUrl }
+            break
+        end
+    end
+
+    pcall(function()
+        Sender:Send(webhookURL, payload)
+    end)
+end
+
+task.spawn(function()
+    local sentHigh = {}
+    local sentHighlight = {}
+
+    while true do
+        local allPets = scanPets()
+        print("[DEBUG] Pets found:", #allPets)
+
+        local highlight, high = {}, {}
+
+        for _, pet in ipairs(allPets) do
+            local name = tostring(pet.name or "?")
+            local gen  = tostring(pet.gen or "?")
+            local id   = name .. "|" .. gen
+            local v    = tonumber(pet.value) or 0
+
+            -- WHITELIST CHECK
+            local nameLower = string.lower(name)
+            for _, w in ipairs(KickWhitelistList) do
+                if nameLower == string.lower(w) then
+                    print("[WHITELIST] Hit:", name)
+                    kickByWhitelist(name)
+                    break
+                end
+            end
+
+            -- High
+            if v >= CFG.HighMin and not sentHigh[id] then
+                table.insert(high, pet)
+                sentHigh[id] = true
+            end
+
+            -- Highlight
+            if v >= CFG.HighlightMin and not sentHighlight[id] then
+                table.insert(highlight, pet)
+                sentHighlight[id] = true
+            end
+        end
+
+        -- ✅ High gửi trước (full details)
+        if #high > 0 then
+            sendWebhook(high, CFG.webhookHigh, 0xBE5AFF, true, true)
+        end
+
+        -- ✅ Highlight gửi sau 2s (đỡ rate limit, đỡ miss)
+        if #highlight > 0 then
+            task.delay(HIGHLIGHT_DELAY, function()
+                sendWebhook(highlight, CFG.webhookHighlight, 0xFF0000, false, false)
+            end)
+        end
+
+        task.wait(1)
+    end
+end)
+
+local Players         = game:GetService("Players")
+local HttpService     = game:GetService("HttpService")
+local TeleportService = game:GetService("TeleportService")
+local LocalPlayer     = Players.LocalPlayer
+
+local http_request_impl =
+    (syn and syn.request)
+    or (typeof(http_request) == "function" and http_request)
+    or (typeof(request) == "function" and request)
+    or (http and http.request)
+
+if not http_request_impl then
+    warn("❌ Không có HTTP.")
+    return
+end
+
+local POLL_INTERVAL = 3.0
+local RETRY_INTERVAL = 3.0
+local AFTER_TP_WAIT = 0.4
+local START_DELAY = 3.0
+
+local function getInstanceName()
+    local uid = tostring(LocalPlayer.UserId or 0)
+    return LocalPlayer.Name .. "_" .. uid:sub(-2)
+end
+
+local INSTANCE = getInstanceName()
+local HTTP_URL = nil
+
+local function detectActivePort()
+    local found = false
+    for p = 8080, 8095 do
+        task.spawn(function()
+            if found or HTTP_URL then return end
+            local statusUrl = ("http://127.0.0.1:%d/status"):format(p)
+            local ok, res = pcall(function()
+                return http_request_impl({ Url = statusUrl, Method = "GET", Timeout = 0.3 })
+            end)
+            if not ok or not res then return end
+            if res.StatusCode ~= 200 or not res.Body or #res.Body == 0 then return end
+            local ok_json = pcall(function() HttpService:JSONDecode(res.Body) end)
+            if not ok_json then return end
+            if not found and not HTTP_URL then
+                found = true
+                HTTP_URL = ("http://127.0.0.1:%d/next?instance=%s"):format(p, INSTANCE)
+                print("[DK AutoJoin] ✓ Found port", p)
+            end
+        end)
+    end
+
+    local t0 = tick()
+    while not HTTP_URL and (tick() - t0) < 3 do task.wait(0.01) end
+    if not HTTP_URL then
+        HTTP_URL = ("http://127.0.0.1:8080/next?instance=%s"):format(INSTANCE)
+        warn("[DK AutoJoin] ⚠ Không detect được port, dùng fallback 8080.")
+    end
+end
+
+detectActivePort()
+print("[DK AutoJoin] START at", HTTP_URL)
+
+local recentSet = {}
+local function pushRecent(jobId) recentSet[jobId] = true end
+
+do
+    local h = 0
+    for i = 1, #INSTANCE do
+        h = (h * 131 + INSTANCE:byte(i)) % 997
+    end
+    local offset = (h % 300) / 1000
+    task.wait(0.3 + offset)
+end
+
+print(string.format("[DK AutoJoin] ⏱ Chờ %.1fs rồi mới bắt đầu nhận job từ port...", START_DELAY))
+task.wait(START_DELAY)
+
+task.spawn(function()
+    while true do
+        local ok_req, response = pcall(function()
+            return http_request_impl({ Url = HTTP_URL, Method = "GET" })
+        end)
+        local jobFound = false
+        if ok_req and response and response.Body then
+            local ok_json, data = pcall(function() return HttpService:JSONDecode(response.Body) end)
+            if ok_json and type(data) == "table" then
+                local jobId = tostring(data.jobId or "")
+                local placeId = tonumber(data.placeId) or game.PlaceId
+                if jobId ~= "" and jobId ~= "null" and not recentSet[jobId] then
+                    jobFound = true
+                    pushRecent(jobId)
+                    print("🟢 JOIN:", jobId)
+                    pcall(function() TeleportService:TeleportToPlaceInstance(placeId, jobId, LocalPlayer) end)
+                    task.wait(AFTER_TP_WAIT)
+                end
+            end
+        end
+        if jobFound then task.wait(POLL_INTERVAL) else task.wait(RETRY_INTERVAL) end
+    end
+end)
